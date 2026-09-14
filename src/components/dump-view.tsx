@@ -72,6 +72,10 @@ export function DumpView({
   }
 
   async function sortDump() {
+    if (!hasKey) {
+      setError("Add your OpenAI API key in Settings first.");
+      return;
+    }
     if (!text.trim() && !image) {
       setError("Type something or add a photo first.");
       return;
@@ -154,7 +158,7 @@ export function DumpView({
       <Textarea
         value={text}
         onChange={(event) => setText(event.target.value)}
-        placeholder="Mum asked if I’m free Sunday… fridge has eggs and leftover rice… pay the bill, reply to the group chat…"
+        placeholder="Paste a chat, a fridge list, a receipt, or whatever is in your head…"
         className="min-h-40 bg-card text-base leading-6"
       />
 
@@ -200,7 +204,7 @@ export function DumpView({
           type="button"
           className="h-11 flex-1"
           onClick={sortDump}
-          disabled={busy || !hasKey}
+          disabled={busy}
         >
           <SparklesIcon />
           {busy ? "Sorting…" : "Sort with OpenAI"}

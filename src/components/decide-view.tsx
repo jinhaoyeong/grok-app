@@ -38,6 +38,10 @@ export function DecideView({
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
+    if (!hasKey) {
+      setError("Add your OpenAI API key in Settings first.");
+      return;
+    }
     if (!decision.trim() || options.length < 2) {
       setError("Write the decision and at least two options, one per line.");
       return;
@@ -114,7 +118,7 @@ export function DecideView({
         type="button"
         className="h-11"
         onClick={() => void decide()}
-        disabled={busy || !hasKey}
+        disabled={busy}
       >
         <SparklesIcon />
         {busy ? "Thinking…" : "Decide"}

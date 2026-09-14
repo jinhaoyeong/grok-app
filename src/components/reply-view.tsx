@@ -42,6 +42,10 @@ export function ReplyView({
   const [result, setResult] = useState<ReplyResult | null>(null);
 
   async function generate() {
+    if (!hasKey) {
+      setError("Add your OpenAI API key in Settings first.");
+      return;
+    }
     if (!incoming.trim()) {
       setError("Paste the message you need to answer.");
       return;
@@ -114,7 +118,7 @@ export function ReplyView({
         type="button"
         className="h-11"
         onClick={() => void generate()}
-        disabled={busy || !hasKey}
+        disabled={busy}
       >
         <SparklesIcon />
         {busy ? "Writing…" : "Draft replies"}
