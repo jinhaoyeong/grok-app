@@ -15,16 +15,20 @@ import { SettingsView } from "@/components/settings-view";
 import { TodayView } from "@/components/today-view";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getStatus } from "@/lib/client-api";
+import { applyDumpToLife, dueHabits, ensureDay, localDateKey } from "@/lib/day";
 import {
   defaultSettings,
   emptyBoard,
+  emptyLife,
   loadBoard,
+  loadLife,
   loadSettings,
   saveBoard,
+  saveLife,
   saveSettings,
 } from "@/lib/storage";
 import { cn } from "@/lib/utils";
-import type { Board, Settings, TabId } from "@/lib/types";
+import type { Board, Life, Settings, TabId } from "@/lib/types";
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof SunIcon }> = [
   { id: "today", label: "Today", icon: SunIcon },
@@ -44,6 +48,7 @@ export function SortedApp() {
   );
   const [tab, setTab] = useState<TabId>("today");
   const [board, setBoard] = useState<Board>(emptyBoard);
+  const [life, setLife] = useState<Life>(emptyLife);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [hydrated, setHydrated] = useState(false);
   const [hasServerKey, setHasServerKey] = useState(false);
@@ -52,6 +57,7 @@ export function SortedApp() {
   if (isClient && !hydrated) {
     setHydrated(true);
     setBoard(loadBoard());
+    setLife(loadLife());
     setSettings(loadSettings());
     setNow(new Date());
   }
@@ -70,10 +76,19 @@ export function SortedApp() {
   }, [board, hydrated]);
 
   useEffect(() => {
+    if (hydrated) saveLife(life);
+  }, [life, hydrated]);
+
+  useEffect(() => {
     if (hydrated) saveSettings(settings);
   }, [settings, hydrated]);
 
   const hasKey = Boolean(settings.apiKey.trim()) || hasServerKey;
+  const todayKey = localDateKey(now ?? new Date());
+  const today = ensureDay(life, todayKey);
+  const leftoverChecks = hydrated
+    ? dueHabits(life, todayKey).filter((habit) => !today.habitDone[habit.id]).length
+    : 0;
 
   function goSettings() {
     setTab("settings");
@@ -85,9 +100,9 @@ export function SortedApp() {
         <div>
           <p className="font-heading text-2xl italic">Sorted</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Dump the mess.
+            Open it in the morning.
             <br />
-            Keep the day.
+            Close it at night.
           </p>
         </div>
         <nav className="flex flex-col gap-1">
@@ -105,6 +120,11 @@ export function SortedApp() {
             >
               <item.icon className="size-4" />
               {item.label}
+              {item.id === "today" && leftoverChecks > 0 ? (
+                <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-medium text-primary">
+                  {leftoverChecks}
+                </span>
+              ) : null}
             </button>
           ))}
         </nav>
@@ -114,7 +134,7 @@ export function SortedApp() {
         <div className="mb-6 flex items-center justify-between md:hidden">
           <p className="font-heading text-xl italic">Sorted</p>
           <p className="text-[11px] tracking-wide text-muted-foreground uppercase">
-            Daily desk
+            {leftoverChecks ? `${leftoverChecks} left today` : "Daily desk"}
           </p>
         </div>
 
@@ -130,9 +150,14 @@ export function SortedApp() {
           <TodayView
             board={board}
             onChange={setBoard}
-            name={settings.profile.name}
+            life={life}
+            onLife={setLife}
+            settings={settings}
+            hasKey={hasKey}
             now={now}
             onDump={() => setTab("dump")}
+            onReply={() => setTab("reply")}
+            onSettings={goSettings}
           />
         ) : null}
 
@@ -142,8 +167,11 @@ export function SortedApp() {
             settings={settings}
             hasKey={hasKey}
             onOpenSettings={goSettings}
-            onAccept={(next) => {
+            onAccept={(next, extras) => {
               setBoard(next);
+              if (extras.spends.length || extras.dinner) {
+                setLife((current) => applyDumpToLife(current, extras));
+              }
               setTab("today");
             }}
           />
@@ -181,7 +209,12 @@ export function SortedApp() {
             onChange={setSettings}
             hasServerKey={hasServerKey}
             board={board}
-            onClearBoard={() => setBoard(emptyBoard())}
+            life={life}
+            onLife={setLife}
+            onClearAll={() => {
+              setBoard(emptyBoard());
+              setLife(emptyLife());
+            }}
           />
         ) : null}
       </main>
@@ -194,12 +227,15 @@ export function SortedApp() {
               type="button"
               onClick={() => setTab(item.id)}
               className={cn(
-                "flex flex-col items-center gap-1 py-2.5 text-[11px]",
+                "relative flex flex-col items-center gap-1 py-2.5 text-[11px]",
                 tab === item.id ? "text-primary" : "text-muted-foreground",
               )}
             >
               <item.icon className="size-5" />
               {item.label}
+              {item.id === "today" && leftoverChecks > 0 ? (
+                <span className="absolute top-1.5 right-[calc(50%-18px)] size-1.5 rounded-full bg-primary" />
+              ) : null}
             </button>
           ))}
         </div>

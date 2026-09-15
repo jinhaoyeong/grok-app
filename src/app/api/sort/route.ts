@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     "Prefer fewer, sharper items. Merge duplicates. Titles should be verbs when they are tasks.",
     "If you see food in a photo, suggest 1-2 meals they can actually cook from it.",
     "If you see a message thread, extract the ask and draft a reply they can send.",
-    "If you see a receipt, pull the store, total, and anything they might need to follow up on.",
+    "If you see a receipt, pull the store, total into spends, and anything they might need to follow up on.",
     "Keep grocery names short and shoppable.",
     `Right now: ${now} (${timeZone}).`,
     name ? `The person's name is ${name}.` : "",

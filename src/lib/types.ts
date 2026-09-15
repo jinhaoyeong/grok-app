@@ -10,6 +10,7 @@ export type Task = {
   priority: Priority;
   done: boolean;
   createdAt: string;
+  doneAt?: string;
 };
 
 export type Grocery = {
@@ -54,6 +55,44 @@ export type Board = {
   notes: Note[];
 };
 
+export type Cadence = "daily" | "weekdays" | "weekends";
+
+export type Habit = {
+  id: string;
+  title: string;
+  cadence: Cadence;
+};
+
+export type Spend = {
+  id: string;
+  amount: number;
+  note: string;
+  createdAt: string;
+};
+
+export type DinnerLog = {
+  name: string;
+  why?: string;
+  steps?: string[];
+  source: "list" | "ai" | "manual";
+};
+
+export type DayLog = {
+  date: string;
+  habitDone: Record<string, boolean>;
+  spends: Spend[];
+  dinner?: DinnerLog;
+  brief?: string;
+  wrap?: string;
+  closedAt?: string;
+  energy?: "low" | "ok" | "high";
+};
+
+export type Life = {
+  habits: Habit[];
+  days: Record<string, DayLog>;
+};
+
 export type Profile = {
   name: string;
   context: string;
@@ -64,16 +103,18 @@ export type Settings = {
   apiKey: string;
   model: ModelId;
   profile: Profile;
+  currency: string;
 };
 
 export type ExtractedBoard = {
   summary: string;
-  tasks: Array<Omit<Task, "id" | "done" | "createdAt">>;
+  tasks: Array<Omit<Task, "id" | "done" | "createdAt" | "doneAt">>;
   groceries: Array<Omit<Grocery, "id" | "checked">>;
   events: Array<Omit<EventItem, "id">>;
   drafts: Array<Omit<Draft, "id">>;
   meals: Array<Omit<Meal, "id">>;
   notes: Array<Omit<Note, "id">>;
+  spends: Array<{ amount: number; note: string }>;
 };
 
 export type ReplyResult = {
@@ -89,6 +130,22 @@ export type DecideResult = {
   why: string;
   ifWrong: string;
   firstStep: string;
+};
+
+export type DayBrief = {
+  headline: string;
+  moves: string[];
+};
+
+export type DayDinner = {
+  name: string;
+  why: string;
+  steps: string[];
+};
+
+export type DayWrap = {
+  wrap: string;
+  tomorrow: string;
 };
 
 export type TabId = "today" | "dump" | "reply" | "decide" | "settings";

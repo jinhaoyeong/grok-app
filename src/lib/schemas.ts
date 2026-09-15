@@ -50,6 +50,16 @@ export const extractedBoardSchema = z.object({
       text: z.string().describe("Anything useful that is not a task."),
     }),
   ),
+  spends: z
+    .array(
+      z.object({
+        amount: z.number().describe("Money amount as a number, no currency symbol."),
+        note: z.string().describe("What it was for."),
+      }),
+    )
+    .optional()
+    .default([])
+    .describe("Receipts or mentioned purchases only. Empty if none."),
 });
 
 export const replyResultSchema = z.object({
@@ -110,4 +120,70 @@ export const decideRequestSchema = z.object({
   constraints: z.string().max(2000).optional().default(""),
   model: z.enum(MODELS).optional(),
   profile: profileSchema.optional(),
+});
+
+export const dayBriefSchema = z.object({
+  headline: z
+    .string()
+    .describe("One sentence: what this next stretch of the day is for."),
+  moves: z
+    .array(z.string())
+    .min(2)
+    .max(4)
+    .describe("Concrete next actions, starting with verbs. No pep talk."),
+});
+
+export const dayDinnerSchema = z.object({
+  name: z.string(),
+  why: z.string().describe("Why this is the dinner given what they have."),
+  steps: z.array(z.string()).min(2).max(6),
+});
+
+export const dayWrapSchema = z.object({
+  wrap: z.string().describe("What actually happened today, 3 sentences max."),
+  tomorrow: z.string().describe("The first useful move tomorrow morning."),
+});
+
+export const dayRequestSchema = z.object({
+  action: z.enum(["brief", "dinner", "wrap"]),
+  model: z.enum(MODELS).optional(),
+  profile: profileSchema.optional(),
+  nowIso: z.string().max(40).optional(),
+  timeZone: z.string().max(80).optional(),
+  energy: z.enum(["low", "ok", "high"]).optional(),
+  habits: z
+    .array(
+      z.object({
+        title: z.string().max(80),
+        done: z.boolean(),
+      }),
+    )
+    .max(20)
+    .optional()
+    .default([]),
+  tasks: z
+    .array(
+      z.object({
+        title: z.string().max(200),
+        priority: z.enum(["now", "today", "later"]),
+        done: z.boolean(),
+      }),
+    )
+    .max(40)
+    .optional()
+    .default([]),
+  groceries: z.array(z.string().max(120)).max(40).optional().default([]),
+  spends: z
+    .array(
+      z.object({
+        amount: z.number(),
+        note: z.string().max(120),
+      }),
+    )
+    .max(40)
+    .optional()
+    .default([]),
+  drafts: z.array(z.string().max(200)).max(20).optional().default([]),
+  dinner: z.string().max(120).optional(),
+  currency: z.string().max(6).optional().default("$"),
 });

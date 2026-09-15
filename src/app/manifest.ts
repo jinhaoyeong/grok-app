@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Sorted",
     short_name: "Sorted",
     description:
-      "Dump the mess. Keep the day. Tasks, groceries, replies, and meals from your OpenAI credit.",
+      "Open it in the morning. Close it at night. Checks, dinner, money, and dumps billed to your OpenAI credit.",
     start_url: "/",
     display: "standalone",
     background_color: "#F4EEE4",

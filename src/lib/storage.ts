@@ -1,8 +1,10 @@
 import { DEFAULT_MODEL } from "@/lib/models";
-import type { Board, Settings } from "@/lib/types";
+import { defaultHabits, emptyDay } from "@/lib/day";
+import type { Board, Life, Settings } from "@/lib/types";
 
 const BOARD_KEY = "sorted.board.v1";
 const SETTINGS_KEY = "sorted.settings.v1";
+const LIFE_KEY = "sorted.life.v1";
 
 export const emptyBoard = (): Board => ({
   tasks: [],
@@ -13,6 +15,11 @@ export const emptyBoard = (): Board => ({
   notes: [],
 });
 
+export const emptyLife = (): Life => ({
+  habits: defaultHabits(),
+  days: {},
+});
+
 export const defaultSettings = (): Settings => ({
   apiKey: "",
   model: DEFAULT_MODEL,
@@ -21,6 +28,7 @@ export const defaultSettings = (): Settings => ({
     context: "",
     voice: "Short, natural, like a text. No corporate tone.",
   },
+  currency: "$",
 });
 
 function canUseStorage(): boolean {
@@ -63,6 +71,7 @@ export function loadSettings(): Settings {
     return {
       apiKey: parsed.apiKey ?? "",
       model: parsed.model ?? defaults.model,
+      currency: parsed.currency ?? defaults.currency,
       profile: {
         ...defaults.profile,
         ...parsed.profile,
@@ -78,6 +87,46 @@ export function saveSettings(settings: Settings): void {
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-export function exportBoardJson(board: Board): string {
-  return JSON.stringify(board, null, 2);
+export function loadLife(): Life {
+  if (!canUseStorage()) return emptyLife();
+  try {
+    const raw = window.localStorage.getItem(LIFE_KEY);
+    if (!raw) return emptyLife();
+    const parsed = JSON.parse(raw) as Partial<Life>;
+    const days = parsed.days ?? {};
+    return {
+      habits:
+        parsed.habits && parsed.habits.length ? parsed.habits : defaultHabits(),
+      days: Object.fromEntries(
+        Object.entries(days).map(([key, day]) => [
+          key,
+          {
+            ...emptyDay(key),
+            ...day,
+            spends: day.spends ?? [],
+            habitDone: day.habitDone ?? {},
+          },
+        ]),
+      ),
+    };
+  } catch {
+    return emptyLife();
+  }
+}
+
+export function saveLife(life: Life): void {
+  if (!canUseStorage()) return;
+  window.localStorage.setItem(LIFE_KEY, JSON.stringify(life));
+}
+
+export function exportAllJson(board: Board, life: Life, settings: Settings): string {
+  return JSON.stringify(
+    {
+      board,
+      life,
+      settings: { ...settings, apiKey: settings.apiKey ? "sk-***" : "" },
+    },
+    null,
+    2,
+  );
 }

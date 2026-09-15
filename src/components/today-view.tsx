@@ -14,10 +14,36 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/copy-button";
 import { Input } from "@/components/ui/input";
+import { postJson } from "@/lib/client-api";
+import {
+  dayPhase,
+  dueHabits,
+  ensureDay,
+  formatMoney,
+  isoToLocalDateKey,
+  localDateKey,
+  localWrap,
+  shiftDateKey,
+  spendTotal,
+  streakCount,
+  upsertDay,
+  weekStrip,
+} from "@/lib/day";
+import { dinnerFromGroceries } from "@/lib/dinner-heuristic";
 import { createId } from "@/lib/ids";
 import { downloadIcs } from "@/lib/ics";
-import { countOpen } from "@/lib/merge";
-import type { Board, Priority, Task } from "@/lib/types";
+import { guessKind, parseAmountOnly, parseSpend, type QuickKind } from "@/lib/parse-quick";
+import type {
+  Board,
+  DayBrief,
+  DayDinner,
+  DayWrap,
+  Life,
+  Priority,
+  Settings,
+  Spend,
+  Task,
+} from "@/lib/types";
 
 const PRIORITY_LABEL: Record<Priority, string> = {
   now: "Now",
@@ -28,26 +54,68 @@ const PRIORITY_LABEL: Record<Priority, string> = {
 export function TodayView({
   board,
   onChange,
-  name,
+  life,
+  onLife,
+  settings,
+  hasKey,
   now,
   onDump,
+  onReply,
+  onSettings,
 }: {
   board: Board;
   onChange: (board: Board) => void;
-  name: string;
+  life: Life;
+  onLife: (life: Life) => void;
+  settings: Settings;
+  hasKey: boolean;
   now: Date | null;
   onDump: () => void;
+  onReply: () => void;
+  onSettings: () => void;
 }) {
+  const dateKey = localDateKey(now ?? new Date());
+  const day = ensureDay(life, dateKey);
+  const yesterdayKey = shiftDateKey(dateKey, -1);
+  const yesterday = ensureDay(life, yesterdayKey);
+  const due = dueHabits(life, dateKey);
+  const dueYesterday = dueHabits(life, yesterdayKey);
+  const yesterdayOpen =
+    !yesterday.closedAt &&
+    dueYesterday.some((habit) => !yesterday.habitDone[habit.id]);
+  const doneHabitCount = due.filter((habit) => day.habitDone[habit.id]).length;
+  const openTasks = board.tasks.filter((task) => !task.done);
+  const doneToday = board.tasks.filter(
+    (task) => task.done && task.doneAt && isoToLocalDateKey(task.doneAt) === dateKey,
+  );
+  const week = weekStrip(life, dateKey);
+  const grouped: Record<Priority, Task[]> = {
+    now: openTasks.filter((task) => task.priority === "now"),
+    today: openTasks.filter((task) => task.priority === "today"),
+    later: openTasks.filter((task) => task.priority === "later"),
+  };
+  const nextTasks = [...grouped.now, ...grouped.today].slice(0, 3);
+  const groceriesOpen = board.groceries.filter((item) => !item.checked);
+  const spent = spendTotal(day.spends);
+  const streak = streakCount(life, dateKey);
+  const phase = dayPhase(now ?? new Date());
+  const currency = settings.currency || "$";
+
   const greeting = useMemo(() => {
     if (!now) return "Today";
-    const hour = now.getHours();
     const hello =
-      hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-    return name.trim() ? `${hello}, ${name.trim()}` : hello;
-  }, [name, now]);
+      phase === "morning"
+        ? "Good morning"
+        : phase === "afternoon"
+          ? "Good afternoon"
+          : "Good evening";
+    return settings.profile.name.trim()
+      ? `${hello}, ${settings.profile.name.trim()}`
+      : hello;
+  }, [now, phase, settings.profile.name]);
 
   const dateLabel = useMemo(() => {
-    if (!now) return "Your board";
+    if (!now) return "Your day";
     return new Intl.DateTimeFormat(undefined, {
       weekday: "long",
       month: "long",
@@ -55,14 +123,220 @@ export function TodayView({
     }).format(now);
   }, [now]);
 
-  const open = countOpen(board);
-  const openTasks = board.tasks.filter((task) => !task.done);
-  const doneTasks = board.tasks.filter((task) => task.done);
-  const grouped: Record<Priority, Task[]> = {
-    now: openTasks.filter((task) => task.priority === "now"),
-    today: openTasks.filter((task) => task.priority === "today"),
-    later: openTasks.filter((task) => task.priority === "later"),
-  };
+  const phaseLine =
+    phase === "morning"
+      ? "Check the repeating list, then the next three tasks. That is the morning."
+      : phase === "afternoon"
+        ? "If dinner is blank, pick it now so 7pm is not a negotiation."
+        : "Close the leftover checks. Log dinner and money. Then stop.";
+
+  const [kind, setKind] = useState<QuickKind>("task");
+  const [quick, setQuick] = useState("");
+  const [spendNote, setSpendNote] = useState("");
+  const [busy, setBusy] = useState<"brief" | "dinner" | "wrap" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function patchDay(partial: Partial<typeof day>) {
+    onLife(upsertDay(life, { ...day, ...partial }));
+  }
+
+  function addQuick() {
+    const value = quick.trim();
+    if (!value) return;
+    const actual = guessKind(value, kind);
+    if (actual === "spend" || kind === "spend") {
+      const parsed = parseSpend(value);
+      if (parsed) {
+        patchDay({
+          spends: [
+            {
+              id: createId("spend"),
+              amount: parsed.amount,
+              note: parsed.note,
+              createdAt: new Date().toISOString(),
+            },
+            ...day.spends,
+          ],
+        });
+        setQuick("");
+        return;
+      }
+      setError("Spends look like: 6.50 coffee");
+      return;
+    }
+    if (actual === "grocery") {
+      onChange({
+        ...board,
+        groceries: [
+          ...board.groceries,
+          { id: createId("groc"), name: value, checked: false },
+        ],
+      });
+      setQuick("");
+      return;
+    }
+    onChange({
+      ...board,
+      tasks: [
+        {
+          id: createId("task"),
+          title: value,
+          priority: phase === "evening" ? "today" : "now",
+          done: false,
+          createdAt: new Date().toISOString(),
+        },
+        ...board.tasks,
+      ],
+    });
+    setQuick("");
+  }
+
+  function addNamedSpend() {
+    const parsed = parseSpend(quick) ?? parseSpend(`${quick} ${spendNote}`.trim());
+    const amountOnly = parseAmountOnly(quick);
+    if (parsed) {
+      patchDay({
+        spends: [
+          {
+            id: createId("spend"),
+            amount: parsed.amount,
+            note: parsed.note,
+            createdAt: new Date().toISOString(),
+          },
+          ...day.spends,
+        ],
+      });
+      setQuick("");
+      setSpendNote("");
+      return;
+    }
+    if (amountOnly && spendNote.trim()) {
+      patchDay({
+        spends: [
+          {
+            id: createId("spend"),
+            amount: amountOnly,
+            note: spendNote.trim(),
+            createdAt: new Date().toISOString(),
+          },
+          ...day.spends,
+        ],
+      });
+      setQuick("");
+      setSpendNote("");
+      return;
+    }
+    setError("Add an amount and what it was for.");
+  }
+
+  function dayBody() {
+    return {
+      model: settings.model,
+      profile: settings.profile,
+      nowIso: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      energy: day.energy,
+      habits: due.map((habit) => ({
+        title: habit.title,
+        done: Boolean(day.habitDone[habit.id]),
+      })),
+      tasks: board.tasks.map((task) => ({
+        title: task.title,
+        priority: task.priority,
+        done: task.done,
+      })),
+      groceries: groceriesOpen.map((item) => item.name),
+      spends: day.spends.map((spend) => ({
+        amount: spend.amount,
+        note: spend.note,
+      })),
+      drafts: board.drafts.map((draft) => draft.purpose),
+      dinner: day.dinner?.name,
+      currency,
+    };
+  }
+
+  async function runBrief() {
+    if (!hasKey) {
+      setError("Add an OpenAI key in Settings to plan the next 90 minutes.");
+      return;
+    }
+    setBusy("brief");
+    setError(null);
+    try {
+      const result = await postJson<DayBrief>(
+        "/api/day",
+        { action: "brief", ...dayBody() },
+        settings.apiKey.trim() || undefined,
+      );
+      patchDay({
+        brief: [result.headline, ...result.moves.map((move) => `• ${move}`)].join(
+          "\n",
+        ),
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Brief failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runDinner() {
+    setBusy("dinner");
+    setError(null);
+    try {
+      if (hasKey) {
+        const result = await postJson<DayDinner>(
+          "/api/day",
+          { action: "dinner", ...dayBody() },
+          settings.apiKey.trim() || undefined,
+        );
+        patchDay({
+          dinner: { ...result, source: "ai" },
+        });
+        return;
+      }
+      const fallback = dinnerFromGroceries(groceriesOpen.map((item) => item.name));
+      patchDay({ dinner: { ...fallback, source: "list" } });
+    } catch {
+      const fallback = dinnerFromGroceries(groceriesOpen.map((item) => item.name));
+      patchDay({ dinner: { ...fallback, source: "list" } });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function closeDay() {
+    setBusy("wrap");
+    setError(null);
+    const fallback = localWrap(
+      doneHabitCount,
+      due.length,
+      doneToday.length,
+      openTasks.length,
+      formatMoney(spent, currency),
+      day.dinner?.name,
+    );
+    try {
+      if (hasKey) {
+        const result = await postJson<DayWrap>(
+          "/api/day",
+          { action: "wrap", ...dayBody() },
+          settings.apiKey.trim() || undefined,
+        );
+        patchDay({
+          wrap: `${result.wrap} Tomorrow: ${result.tomorrow}`,
+          closedAt: new Date().toISOString(),
+        });
+        return;
+      }
+      patchDay({ wrap: fallback, closedAt: new Date().toISOString() });
+    } catch {
+      patchDay({ wrap: fallback, closedAt: new Date().toISOString() });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -71,52 +345,426 @@ export function TodayView({
         <h1 className="font-heading text-3xl leading-tight font-medium tracking-tight">
           {greeting}
         </h1>
-        <p className="text-sm text-muted-foreground">
-          {open.tasks} open {open.tasks === 1 ? "task" : "tasks"} · {open.groceries}{" "}
-          grocery {open.groceries === 1 ? "item" : "items"}
+        <p className="text-sm text-muted-foreground">{phaseLine}</p>
+        <p className="text-xs text-muted-foreground">
+          {doneHabitCount}/{due.length || 0} daily · {openTasks.length} open tasks
+          {groceriesOpen.length ? ` · ${groceriesOpen.length} to buy` : ""} ·{" "}
+          {formatMoney(spent, currency)} today
+          {streak ? ` · ${streak} day streak` : ""}
         </p>
+        <div className="mt-3 flex gap-1" aria-label="Last seven days">
+          {week.map((dayDot) => (
+            <div
+              key={dayDot.key}
+              className="flex flex-1 flex-col items-center gap-1"
+            >
+              <span className="text-[10px] text-muted-foreground">{dayDot.label}</span>
+              <span
+                className={`h-1.5 w-full rounded-full ${
+                  dayDot.done
+                    ? "bg-primary"
+                    : dayDot.isToday
+                      ? "bg-primary/30"
+                      : "bg-secondary"
+                }`}
+              />
+            </div>
+          ))}
+        </div>
       </header>
 
-      {board.tasks.length === 0 &&
-      board.groceries.length === 0 &&
-      board.events.length === 0 &&
-      board.drafts.length === 0 &&
-      board.meals.length === 0 &&
-      board.notes.length === 0 ? (
+      {yesterdayOpen ? (
         <Card>
-          <CardContent className="flex flex-col gap-3 py-6">
-            <p className="font-heading text-lg">The board is empty.</p>
+          <CardContent className="flex flex-col gap-2 py-4">
+            <p className="text-sm font-medium">Yesterday is still open.</p>
             <p className="text-sm text-muted-foreground">
-              Dump a messy thought, a fridge photo, a receipt, or a chat. Sorted
-              files it into tasks, groceries, drafts, and meals.
+              Close it, or skip so today is not mixed with leftover guilt.
             </p>
-            <Button type="button" className="h-11 w-full sm:w-auto" onClick={onDump}>
-              Dump something
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() =>
+                  onLife(
+                    upsertDay(life, {
+                      ...yesterday,
+                      closedAt: new Date().toISOString(),
+                      wrap:
+                        yesterday.wrap ||
+                        "Closed late. Unchecked items stay on the repeating list.",
+                    }),
+                  )
+                }
+              >
+                Close yesterday
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  onLife(
+                    upsertDay(life, {
+                      ...yesterday,
+                      closedAt: new Date().toISOString(),
+                      wrap: yesterday.wrap || "Skipped.",
+                    }),
+                  )
+                }
+              >
+                Skip
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <section className="flex flex-col gap-2">
+        <div className="flex flex-wrap gap-2">
+          {(["task", "grocery", "spend"] as QuickKind[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setKind(item)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                kind === item
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground"
+              }`}
+            >
+              {item === "task" ? "Task" : item === "grocery" ? "Buy" : "Spent"}
+            </button>
+          ))}
+        </div>
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (kind === "spend") addNamedSpend();
+            else addQuick();
+            setError(null);
+          }}
+        >
+          <div className="flex gap-2">
+            <Input
+              value={quick}
+              onChange={(event) => setQuick(event.target.value)}
+              placeholder={
+                kind === "spend"
+                  ? "6.50 coffee"
+                  : kind === "grocery"
+                    ? "Milk, eggs…"
+                    : "What needs doing?"
+              }
+              className="h-11"
+            />
+            <Button type="submit" className="h-11">
+              <PlusIcon />
+              Add
+            </Button>
+          </div>
+          {kind === "spend" ? (
+            <Input
+              value={spendNote}
+              onChange={(event) => setSpendNote(event.target.value)}
+              placeholder="If you only typed the amount, what was it for?"
+              className="h-10"
+            />
+          ) : null}
+        </form>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-heading text-xl">Today’s checks</h2>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+            onClick={onSettings}
+          >
+            Edit list
+          </button>
+        </div>
+        {due.length ? (
+          <Card size="sm">
+            <CardContent className="flex flex-col">
+              {due.map((habit) => {
+                const checked = Boolean(day.habitDone[habit.id]);
+                return (
+                  <label
+                    key={habit.id}
+                    className="flex items-center gap-3 border-b border-border/60 py-3 last:border-b-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        patchDay({
+                          habitDone: {
+                            ...day.habitDone,
+                            [habit.id]: !checked,
+                          },
+                        })
+                      }
+                      className="size-5 accent-primary"
+                    />
+                    <span className={checked ? "text-muted-foreground line-through" : ""}>
+                      {habit.title}
+                    </span>
+                  </label>
+                );
+              })}
+            </CardContent>
+          </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Add repeating daily items in Settings. That is what makes this worth
+            opening tomorrow.
+          </p>
+        )}
+      </section>
+
+      {nextTasks.length ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="font-heading text-xl">Do next</h2>
+          {nextTasks.map((task) => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              onToggle={() => toggleTask(board, onChange, task.id)}
+              onRemove={() =>
+                onChange({
+                  ...board,
+                  tasks: board.tasks.filter((item) => item.id !== task.id),
+                })
+              }
+            />
+          ))}
+        </section>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No open “now” or “today” tasks. Dump a messy list, or add one above.
+        </p>
+      )}
+
+      {board.drafts.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Unsent ({board.drafts.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {board.drafts.slice(0, 2).map((draft) => (
+              <div key={draft.id} className="flex flex-col gap-2">
+                <p className="text-sm font-medium">{draft.purpose}</p>
+                <p className="line-clamp-3 text-sm text-muted-foreground">
+                  {draft.text}
+                </p>
+                <CopyButton text={draft.text} />
+              </div>
+            ))}
+            <Button type="button" variant="outline" onClick={onReply}>
+              Write another reply
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
       <section className="flex flex-col gap-3">
-        <SectionTitle>Tasks</SectionTitle>
-        <AddRow
-          placeholder="Add a task"
-          onAdd={(title) =>
-            onChange({
-              ...board,
-              tasks: [
-                {
-                  id: createId("task"),
-                  title,
-                  priority: "today",
-                  done: false,
-                  createdAt: new Date().toISOString(),
-                },
-                ...board.tasks,
-              ],
-            })
-          }
-        />
+        <h2 className="font-heading text-xl">Tonight</h2>
+        {day.dinner ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ChefHatIcon className="size-4 text-primary" />
+                {day.dinner.name}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2 text-sm">
+              {day.dinner.why ? (
+                <p className="text-muted-foreground">{day.dinner.why}</p>
+              ) : null}
+              {day.dinner.steps?.length ? (
+                <ol className="list-decimal space-y-1 pl-4">
+                  {day.dinner.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => patchDay({ dinner: undefined })}
+              >
+                Clear dinner
+              </Button>
+              {board.meals.length ? (
+                <div className="flex flex-col gap-1 pt-1">
+                  <p className="text-xs text-muted-foreground">Other ideas</p>
+                  {board.meals
+                    .filter((meal) => meal.name !== day.dinner?.name)
+                    .slice(0, 3)
+                    .map((meal) => (
+                      <button
+                        key={meal.id}
+                        type="button"
+                        className="text-left text-sm underline-offset-4 hover:underline"
+                        onClick={() =>
+                          patchDay({
+                            dinner: {
+                              name: meal.name,
+                              why: meal.why,
+                              steps: meal.steps,
+                              source: "list",
+                            },
+                          })
+                        }
+                      >
+                        {meal.name}
+                      </button>
+                    ))}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col gap-3 py-4">
+              <p className="text-sm text-muted-foreground">
+                {groceriesOpen.length
+                  ? `${groceriesOpen.length} things on the buy list. Turn that into dinner so you are not deciding hungry.`
+                  : "No groceries yet. Dump a fridge photo, or pick a tired default."}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void runDinner()}
+                  disabled={busy === "dinner"}
+                >
+                  {busy === "dinner" ? "Picking…" : "What’s for dinner"}
+                </Button>
+                <Button type="button" variant="outline" onClick={onDump}>
+                  Fridge photo
+                </Button>
+              </div>
+              {board.meals.length ? (
+                <div className="flex flex-col gap-2">
+                  {board.meals.slice(0, 3).map((meal) => (
+                    <Button
+                      key={meal.id}
+                      type="button"
+                      variant="outline"
+                      className="h-auto justify-start py-2 text-left"
+                      onClick={() =>
+                        patchDay({
+                          dinner: {
+                            name: meal.name,
+                            why: meal.why,
+                            steps: meal.steps,
+                            source: "list",
+                          },
+                        })
+                      }
+                    >
+                      Cook {meal.name}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-heading text-xl">Money today</h2>
+        <p className="text-sm text-muted-foreground">
+          {formatMoney(spent, currency)} logged
+        </p>
+        {day.spends.length ? (
+          <Card size="sm">
+            <CardContent className="flex flex-col">
+              {day.spends.map((spend) => (
+                <SpendRow
+                  key={spend.id}
+                  spend={spend}
+                  currency={currency}
+                  onRemove={() =>
+                    patchDay({
+                      spends: day.spends.filter((item) => item.id !== spend.id),
+                    })
+                  }
+                />
+              ))}
+            </CardContent>
+          </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Log coffee, Grab, lunch. Dump a receipt and it lands here too.
+          </p>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <div className="flex flex-wrap gap-2">
+          {(["low", "ok", "high"] as const).map((level) => (
+            <button
+              key={level}
+              type="button"
+              onClick={() => patchDay({ energy: level })}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                day.energy === level
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground"
+              }`}
+            >
+              {level === "low" ? "Low energy" : level === "ok" ? "OK" : "High energy"}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void runBrief()}
+            disabled={busy === "brief"}
+          >
+            {busy === "brief" ? "Planning…" : "Plan the next 90 minutes"}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void closeDay()}
+            disabled={busy === "wrap" || Boolean(day.closedAt)}
+          >
+            {day.closedAt
+              ? "Day closed"
+              : busy === "wrap"
+                ? "Closing…"
+                : "Close the day"}
+          </Button>
+        </div>
+        {day.brief ? (
+          <Card size="sm">
+            <CardContent className="whitespace-pre-wrap text-sm leading-6">
+              {day.brief}
+            </CardContent>
+          </Card>
+        ) : null}
+        {day.wrap ? (
+          <Card size="sm">
+            <CardContent className="text-sm leading-6 text-muted-foreground">
+              {day.wrap}
+            </CardContent>
+          </Card>
+        ) : null}
+      </section>
+
+      {error ? (
+        <p className="text-sm text-destructive">{error}</p>
+      ) : null}
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-heading text-xl">Tasks</h2>
         {(["now", "today", "later"] as Priority[]).map((priority) =>
           grouped[priority].length ? (
             <div key={priority} className="flex flex-col gap-2">
@@ -127,14 +775,7 @@ export function TodayView({
                 <TaskRow
                   key={task.id}
                   task={task}
-                  onToggle={() =>
-                    onChange({
-                      ...board,
-                      tasks: board.tasks.map((item) =>
-                        item.id === task.id ? { ...item, done: !item.done } : item,
-                      ),
-                    })
-                  }
+                  onToggle={() => toggleTask(board, onChange, task.id)}
                   onRemove={() =>
                     onChange({
                       ...board,
@@ -146,51 +787,34 @@ export function TodayView({
             </div>
           ) : null,
         )}
-        {doneTasks.length ? (
+        {board.tasks.filter((task) => task.done).length ? (
           <details className="text-sm text-muted-foreground">
             <summary className="cursor-pointer select-none">
-              {doneTasks.length} done
+              {board.tasks.filter((task) => task.done).length} done
             </summary>
             <div className="mt-2 flex flex-col gap-2">
-              {doneTasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  onToggle={() =>
-                    onChange({
-                      ...board,
-                      tasks: board.tasks.map((item) =>
-                        item.id === task.id ? { ...item, done: !item.done } : item,
-                      ),
-                    })
-                  }
-                  onRemove={() =>
-                    onChange({
-                      ...board,
-                      tasks: board.tasks.filter((item) => item.id !== task.id),
-                    })
-                  }
-                />
-              ))}
+              {board.tasks
+                .filter((task) => task.done)
+                .map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    onToggle={() => toggleTask(board, onChange, task.id)}
+                    onRemove={() =>
+                      onChange({
+                        ...board,
+                        tasks: board.tasks.filter((item) => item.id !== task.id),
+                      })
+                    }
+                  />
+                ))}
             </div>
           </details>
         ) : null}
       </section>
 
       <section className="flex flex-col gap-3">
-        <SectionTitle>Groceries</SectionTitle>
-        <AddRow
-          placeholder="Add milk, eggs…"
-          onAdd={(name) =>
-            onChange({
-              ...board,
-              groceries: [
-                ...board.groceries,
-                { id: createId("groc"), name, checked: false },
-              ],
-            })
-          }
-        />
+        <h2 className="font-heading text-xl">To buy</h2>
         {board.groceries.length ? (
           <Card size="sm">
             <CardContent className="flex flex-col gap-1">
@@ -247,49 +871,14 @@ export function TodayView({
           </Card>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Dump a fridge photo or a shopping thought and they land here.
+            Use Buy above, or dump a fridge photo.
           </p>
         )}
       </section>
 
-      {board.drafts.length ? (
-        <section className="flex flex-col gap-3">
-          <SectionTitle>Drafts to send</SectionTitle>
-          {board.drafts.map((draft) => (
-            <Card key={draft.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between gap-2">
-                  <span>{draft.purpose}</span>
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      onChange({
-                        ...board,
-                        drafts: board.drafts.filter((item) => item.id !== draft.id),
-                      })
-                    }
-                    aria-label="Remove draft"
-                  >
-                    <Trash2Icon className="size-4" />
-                  </button>
-                </CardTitle>
-                {draft.to ? (
-                  <p className="text-xs text-muted-foreground">To {draft.to}</p>
-                ) : null}
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <p className="whitespace-pre-wrap text-sm leading-6">{draft.text}</p>
-                <CopyButton text={draft.text} label="Copy reply" />
-              </CardContent>
-            </Card>
-          ))}
-        </section>
-      ) : null}
-
       {board.events.length ? (
         <section className="flex flex-col gap-3">
-          <SectionTitle>When</SectionTitle>
+          <h2 className="font-heading text-xl">When</h2>
           {board.events.map((event) => (
             <Card key={event.id} size="sm">
               <CardContent className="flex items-start justify-between gap-3">
@@ -332,48 +921,9 @@ export function TodayView({
         </section>
       ) : null}
 
-      {board.meals.length ? (
-        <section className="flex flex-col gap-3">
-          <SectionTitle>Meals</SectionTitle>
-          {board.meals.map((meal) => (
-            <Card key={meal.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-2">
-                    <ChefHatIcon className="size-4 text-primary" />
-                    {meal.name}
-                  </span>
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      onChange({
-                        ...board,
-                        meals: board.meals.filter((item) => item.id !== meal.id),
-                      })
-                    }
-                    aria-label="Remove meal"
-                  >
-                    <Trash2Icon className="size-4" />
-                  </button>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                <p className="text-sm text-muted-foreground">{meal.why}</p>
-                <ol className="list-decimal space-y-1 pl-4 text-sm">
-                  {meal.steps.map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ol>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
-      ) : null}
-
       {board.notes.length ? (
         <section className="flex flex-col gap-3">
-          <SectionTitle>Notes</SectionTitle>
+          <h2 className="font-heading text-xl">Notes</h2>
           {board.notes.map((note) => (
             <Card key={note.id} size="sm">
               <CardContent className="flex items-start gap-3">
@@ -401,40 +951,47 @@ export function TodayView({
   );
 }
 
-function SectionTitle({ children }: { children: string }) {
-  return <h2 className="font-heading text-xl">{children}</h2>;
+function toggleTask(
+  board: Board,
+  onChange: (board: Board) => void,
+  id: string,
+) {
+  onChange({
+    ...board,
+    tasks: board.tasks.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            done: !item.done,
+            doneAt: !item.done ? new Date().toISOString() : undefined,
+          }
+        : item,
+    ),
+  });
 }
 
-function AddRow({
-  placeholder,
-  onAdd,
+function SpendRow({
+  spend,
+  currency,
+  onRemove,
 }: {
-  placeholder: string;
-  onAdd: (value: string) => void;
+  spend: Spend;
+  currency: string;
+  onRemove: () => void;
 }) {
-  const [value, setValue] = useState("");
   return (
-    <form
-      className="flex gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const next = value.trim();
-        if (!next) return;
-        onAdd(next);
-        setValue("");
-      }}
-    >
-      <Input
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder={placeholder}
-        className="h-10"
-      />
-      <Button type="submit" variant="secondary" className="h-10">
-        <PlusIcon />
-        Add
-      </Button>
-    </form>
+    <div className="flex items-center gap-3 py-2">
+      <span className="w-16 font-medium">{formatMoney(spend.amount, currency)}</span>
+      <span className="flex-1 text-sm">{spend.note}</span>
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-foreground"
+        onClick={onRemove}
+        aria-label="Remove spend"
+      >
+        <Trash2Icon className="size-4" />
+      </button>
+    </div>
   );
 }
 
