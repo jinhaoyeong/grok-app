@@ -43,7 +43,6 @@ export function defaultHabits(): Habit[] {
     { id: createId("habit"), title: "Move (walk, stretch, gym)", cadence: "daily" },
     { id: createId("habit"), title: "Eat a real meal", cadence: "daily" },
     { id: createId("habit"), title: "One admin thing", cadence: "weekdays" },
-    { id: createId("habit"), title: "Message someone I owe", cadence: "daily" },
   ];
 }
 

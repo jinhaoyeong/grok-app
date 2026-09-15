@@ -111,6 +111,11 @@ export function SortedApp() {
               key={item.id}
               type="button"
               onClick={() => setTab(item.id)}
+              aria-label={
+                item.id === "today" && leftoverChecks > 0
+                  ? `${item.label}, ${leftoverChecks} left`
+                  : item.label
+              }
               className={cn(
                 "flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
                 tab === item.id
@@ -121,7 +126,14 @@ export function SortedApp() {
               <item.icon className="size-4" />
               {item.label}
               {item.id === "today" && leftoverChecks > 0 ? (
-                <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-medium text-primary">
+                <span
+                  className={cn(
+                    "ml-auto rounded-full px-1.5 text-[10px] font-medium",
+                    tab === item.id
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-primary/15 text-primary",
+                  )}
+                >
                   {leftoverChecks}
                 </span>
               ) : null}
@@ -226,6 +238,11 @@ export function SortedApp() {
               key={item.id}
               type="button"
               onClick={() => setTab(item.id)}
+              aria-label={
+                item.id === "today" && leftoverChecks > 0
+                  ? `${item.label}, ${leftoverChecks} left`
+                  : item.label
+              }
               className={cn(
                 "relative flex flex-col items-center gap-1 py-2.5 text-[11px]",
                 tab === item.id ? "text-primary" : "text-muted-foreground",

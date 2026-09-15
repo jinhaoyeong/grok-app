@@ -79,10 +79,7 @@ export function TodayView({
   const yesterdayKey = shiftDateKey(dateKey, -1);
   const yesterday = ensureDay(life, yesterdayKey);
   const due = dueHabits(life, dateKey);
-  const dueYesterday = dueHabits(life, yesterdayKey);
-  const yesterdayOpen =
-    !yesterday.closedAt &&
-    dueYesterday.some((habit) => !yesterday.habitDone[habit.id]);
+  const yesterdayOpen = Boolean(life.days[yesterdayKey]) && !yesterday.closedAt;
   const doneHabitCount = due.filter((habit) => day.habitDone[habit.id]).length;
   const openTasks = board.tasks.filter((task) => !task.done);
   const doneToday = board.tasks.filter(
@@ -95,6 +92,12 @@ export function TodayView({
     later: openTasks.filter((task) => task.priority === "later"),
   };
   const nextTasks = [...grouped.now, ...grouped.today].slice(0, 3);
+  const nextIds = new Set(nextTasks.map((task) => task.id));
+  const restTasks: Record<Priority, Task[]> = {
+    now: grouped.now.filter((task) => !nextIds.has(task.id)),
+    today: grouped.today.filter((task) => !nextIds.has(task.id)),
+    later: grouped.later,
+  };
   const groceriesOpen = board.groceries.filter((item) => !item.checked);
   const spent = spendTotal(day.spends);
   const streak = streakCount(life, dateKey);
@@ -763,15 +766,19 @@ export function TodayView({
         <p className="text-sm text-destructive">{error}</p>
       ) : null}
 
+      {restTasks.now.length ||
+      restTasks.today.length ||
+      restTasks.later.length ||
+      board.tasks.some((task) => task.done) ? (
       <section className="flex flex-col gap-3">
         <h2 className="font-heading text-xl">Tasks</h2>
         {(["now", "today", "later"] as Priority[]).map((priority) =>
-          grouped[priority].length ? (
+          restTasks[priority].length ? (
             <div key={priority} className="flex flex-col gap-2">
               <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {PRIORITY_LABEL[priority]}
               </p>
-              {grouped[priority].map((task) => (
+              {restTasks[priority].map((task) => (
                 <TaskRow
                   key={task.id}
                   task={task}
@@ -812,6 +819,7 @@ export function TodayView({
           </details>
         ) : null}
       </section>
+      ) : null}
 
       <section className="flex flex-col gap-3">
         <h2 className="font-heading text-xl">To buy</h2>
