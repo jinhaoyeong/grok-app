@@ -1,8 +1,11 @@
 import { generateText, Output } from "ai";
+import { readJsonBody, requireAiAccess } from "@/lib/api-guard";
 import {
+  getOpenAiApiKey,
+  jsonError,
+  jsonOk,
   missingKeyResponse,
   openaiClient,
-  resolveApiKey,
   resolveModel,
   toErrorMessage,
 } from "@/lib/openai-server";
@@ -13,22 +16,24 @@ import {
   dayWrapSchema,
 } from "@/lib/schemas";
 
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const MAX_BYTES = 100_000;
+
 export async function POST(request: Request) {
-  const apiKey = resolveApiKey(request);
+  const blocked = await requireAiAccess(request, { maxBytes: MAX_BYTES });
+  if (blocked) return blocked;
+
+  const apiKey = getOpenAiApiKey();
   if (!apiKey) return missingKeyResponse();
 
-  let json: unknown;
-  try {
-    json = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const bodyRead = await readJsonBody(request, MAX_BYTES);
+  if (!bodyRead.ok) return bodyRead.response;
 
-  const parsed = dayRequestSchema.safeParse(json);
+  const parsed = dayRequestSchema.safeParse(bodyRead.value);
   if (!parsed.success) {
-    return Response.json({ error: "That day request was incomplete." }, { status: 400 });
+    return jsonError("That day request was incomplete.", 400);
   }
 
   const body = parsed.data;
@@ -76,9 +81,9 @@ export async function POST(request: Request) {
         prompt: "Write today's next-stretch brief.",
       });
       if (!output) {
-        return Response.json({ error: "No brief came back." }, { status: 502 });
+        return jsonError("No brief came back.", 502);
       }
-      return Response.json(output);
+      return jsonOk(output);
     }
 
     if (body.action === "dinner") {
@@ -93,9 +98,9 @@ export async function POST(request: Request) {
         prompt: "What should they cook tonight?",
       });
       if (!output) {
-        return Response.json({ error: "No dinner came back." }, { status: 502 });
+        return jsonError("No dinner came back.", 502);
       }
-      return Response.json(output);
+      return jsonOk(output);
     }
 
     const { output } = await generateText({
@@ -109,10 +114,10 @@ export async function POST(request: Request) {
       prompt: "Write the wrap for today.",
     });
     if (!output) {
-      return Response.json({ error: "No wrap came back." }, { status: 502 });
+      return jsonError("No wrap came back.", 502);
     }
-    return Response.json(output);
+    return jsonOk(output);
   } catch (error) {
-    return Response.json({ error: toErrorMessage(error) }, { status: 502 });
+    return jsonError(toErrorMessage(error), 502);
   }
 }

@@ -1,43 +1,45 @@
 import { generateText, Output } from "ai";
+import { readJsonBody, requireAiAccess } from "@/lib/api-guard";
 import { parseDataUrl } from "@/lib/image";
 import {
+  getOpenAiApiKey,
+  jsonError,
+  jsonOk,
   missingKeyResponse,
   openaiClient,
-  resolveApiKey,
   resolveModel,
   toErrorMessage,
 } from "@/lib/openai-server";
 import { extractedBoardSchema, sortRequestSchema } from "@/lib/schemas";
 
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const MAX_BYTES = 6_500_000;
+
 export async function POST(request: Request) {
-  const apiKey = resolveApiKey(request);
+  const blocked = await requireAiAccess(request, { maxBytes: MAX_BYTES });
+  if (blocked) return blocked;
+
+  const apiKey = getOpenAiApiKey();
   if (!apiKey) return missingKeyResponse();
 
-  let json: unknown;
-  try {
-    json = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const bodyRead = await readJsonBody(request, MAX_BYTES);
+  if (!bodyRead.ok) return bodyRead.response;
 
-  const parsed = sortRequestSchema.safeParse(json);
+  const parsed = sortRequestSchema.safeParse(bodyRead.value);
   if (!parsed.success) {
-    return Response.json({ error: "Check the dump and try again." }, { status: 400 });
+    return jsonError("Check the dump and try again.", 400);
   }
 
   const body = parsed.data;
   if (!body.text.trim() && !body.image) {
-    return Response.json(
-      { error: "Type something or add a photo first." },
-      { status: 400 },
-    );
+    return jsonError("Type something or add a photo first.", 400);
   }
 
   const image = body.image ? parseDataUrl(body.image) : null;
   if (body.image && !image) {
-    return Response.json({ error: "That photo could not be read." }, { status: 400 });
+    return jsonError("That photo could not be read.", 400);
   }
 
   const modelId = resolveModel(body.model);
@@ -101,14 +103,11 @@ export async function POST(request: Request) {
     });
 
     if (!output) {
-      return Response.json(
-        { error: "The model returned an empty board." },
-        { status: 502 },
-      );
+      return jsonError("The model returned an empty board.", 502);
     }
 
-    return Response.json(output);
+    return jsonOk(output);
   } catch (error) {
-    return Response.json({ error: toErrorMessage(error) }, { status: 502 });
+    return jsonError(toErrorMessage(error), 502);
   }
 }

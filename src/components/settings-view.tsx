@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { PlusIcon, Trash2Icon } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { defaultHabits } from "@/lib/day";
 import { createId } from "@/lib/ids";
@@ -32,22 +30,24 @@ const CADENCE_LABEL: Record<Cadence, string> = {
 export function SettingsView({
   settings,
   onChange,
-  hasServerKey,
+  gate,
   board,
   life,
   onLife,
   onClearAll,
+  onLock,
 }: {
   settings: Settings;
   onChange: (settings: Settings) => void;
-  hasServerKey: boolean;
+  gate: boolean;
   board: Board;
   life: Life;
   onLife: (life: Life) => void;
   onClearAll: () => void;
+  onLock?: () => Promise<void>;
 }) {
-  const [showKey, setShowKey] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const [locking, setLocking] = useState(false);
   const [newHabit, setNewHabit] = useState("");
   const [newCadence, setNewCadence] = useState<Cadence>("daily");
 
@@ -93,8 +93,7 @@ export function SettingsView({
           Settings
         </h1>
         <p className="text-sm text-muted-foreground">
-          The repeating list is what makes Sorted worth opening tomorrow. The
-          key is only needed when you dump, reply, or ask the model to plan.
+          The repeating list is what makes Sorted worth opening tomorrow.
         </p>
       </header>
 
@@ -247,41 +246,6 @@ export function SettingsView({
         />
       </section>
 
-      {hasServerKey ? (
-        <Alert>
-          <AlertTitle>Server key is set</AlertTitle>
-          <AlertDescription>
-            OPENAI_API_KEY is available on the server. A key pasted here still
-            overrides it for this browser.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <section className="flex flex-col gap-3">
-        <Label htmlFor="apiKey">OpenAI API key</Label>
-        <Input
-          id="apiKey"
-          type={showKey ? "text" : "password"}
-          autoComplete="off"
-          value={settings.apiKey}
-          onChange={(event) =>
-            onChange({ ...settings, apiKey: event.target.value })
-          }
-          placeholder="sk-..."
-          className="h-10 font-mono"
-        />
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Switch checked={showKey} onCheckedChange={setShowKey} />
-          Show key
-        </label>
-        <p className="text-xs leading-5 text-muted-foreground">
-          Create a key at platform.openai.com. Sorted never stores it in a
-          database — only in this browser, and only sent to your own app server
-          to call OpenAI. Habits, spends, and close-the-day still work without
-          it.
-        </p>
-      </section>
-
       <section className="flex flex-col gap-3">
         <Label>Model</Label>
         <Select
@@ -347,6 +311,19 @@ export function SettingsView({
           <Button type="button" variant="outline" onClick={downloadBackup}>
             Export backup
           </Button>
+          {gate && onLock ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={locking}
+              onClick={() => {
+                setLocking(true);
+                void onLock().finally(() => setLocking(false));
+              }}
+            >
+              {locking ? "Locking…" : "Lock this device"}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="destructive"
@@ -356,7 +333,7 @@ export function SettingsView({
               setCleared(true);
             }}
           >
-            Clear board, checks, and key
+            Clear board and checks
           </Button>
         </div>
         {cleared ? (

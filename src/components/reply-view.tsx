@@ -8,10 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/copy-button";
 import { Input } from "@/components/ui/input";
-import { KeyBanner } from "@/components/key-banner";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { postJson } from "@/lib/client-api";
+import { postJson, UNAVAILABLE } from "@/lib/client-api";
 import { createId } from "@/lib/ids";
 import { REPLY_SAMPLE } from "@/lib/examples";
 import type { Board, ReplyResult, Settings } from "@/lib/types";
@@ -25,14 +24,12 @@ const TONE_LABEL = {
 export function ReplyView({
   board,
   settings,
-  hasKey,
-  onOpenSettings,
+  canUseModel,
   onSaveDraft,
 }: {
   board: Board;
   settings: Settings;
-  hasKey: boolean;
-  onOpenSettings: () => void;
+  canUseModel: boolean;
   onSaveDraft: (board: Board) => void;
 }) {
   const [incoming, setIncoming] = useState("");
@@ -42,8 +39,8 @@ export function ReplyView({
   const [result, setResult] = useState<ReplyResult | null>(null);
 
   async function generate() {
-    if (!hasKey) {
-      setError("Add your OpenAI API key in Settings first.");
+    if (!canUseModel) {
+      setError(UNAVAILABLE);
       return;
     }
     if (!incoming.trim()) {
@@ -61,7 +58,6 @@ export function ReplyView({
           model: settings.model,
           profile: settings.profile,
         },
-        settings.apiKey.trim() || undefined,
       );
       setResult(next);
     } catch (caught) {
@@ -82,8 +78,6 @@ export function ReplyView({
           Paste the awkward text. Get three sendable versions.
         </p>
       </header>
-
-      {!hasKey ? <KeyBanner onOpenSettings={onOpenSettings} /> : null}
 
       <div className="flex flex-col gap-3">
         <Label htmlFor="incoming">Incoming message</Label>

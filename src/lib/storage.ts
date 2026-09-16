@@ -3,7 +3,8 @@ import { defaultHabits, emptyDay } from "@/lib/day";
 import type { Board, Life, Settings } from "@/lib/types";
 
 const BOARD_KEY = "sorted.board.v1";
-const SETTINGS_KEY = "sorted.settings.v1";
+const SETTINGS_KEY = "sorted.settings.v2";
+const LEGACY_SETTINGS_KEY = "sorted.settings.v1";
 const LIFE_KEY = "sorted.life.v1";
 
 export const emptyBoard = (): Board => ({
@@ -21,7 +22,6 @@ export const emptyLife = (): Life => ({
 });
 
 export const defaultSettings = (): Settings => ({
-  apiKey: "",
   model: DEFAULT_MODEL,
   profile: {
     name: "",
@@ -33,6 +33,25 @@ export const defaultSettings = (): Settings => ({
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined";
+}
+
+function settingsFromUnknown(value: unknown): Settings {
+  const defaults = defaultSettings();
+  if (!value || typeof value !== "object") return defaults;
+  const parsed = value as Partial<Settings>;
+  return {
+    model: parsed.model ?? defaults.model,
+    currency: parsed.currency ?? defaults.currency,
+    profile: {
+      ...defaults.profile,
+      ...parsed.profile,
+    },
+  };
+}
+
+function persistSettings(settings: Settings): void {
+  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  window.localStorage.removeItem(LEGACY_SETTINGS_KEY);
 }
 
 export function loadBoard(): Board {
@@ -64,27 +83,22 @@ export function saveBoard(board: Board): void {
 export function loadSettings(): Settings {
   if (!canUseStorage()) return defaultSettings();
   try {
-    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    const current = window.localStorage.getItem(SETTINGS_KEY);
+    const legacy = window.localStorage.getItem(LEGACY_SETTINGS_KEY);
+    const raw = current ?? legacy;
     if (!raw) return defaultSettings();
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    const defaults = defaultSettings();
-    return {
-      apiKey: parsed.apiKey ?? "",
-      model: parsed.model ?? defaults.model,
-      currency: parsed.currency ?? defaults.currency,
-      profile: {
-        ...defaults.profile,
-        ...parsed.profile,
-      },
-    };
+    const settings = settingsFromUnknown(JSON.parse(raw));
+    persistSettings(settings);
+    return settings;
   } catch {
+    window.localStorage.removeItem(LEGACY_SETTINGS_KEY);
     return defaultSettings();
   }
 }
 
 export function saveSettings(settings: Settings): void {
   if (!canUseStorage()) return;
-  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  persistSettings(settings);
 }
 
 export function loadLife(): Life {
@@ -124,7 +138,7 @@ export function exportAllJson(board: Board, life: Life, settings: Settings): str
     {
       board,
       life,
-      settings: { ...settings, apiKey: settings.apiKey ? "sk-***" : "" },
+      settings,
     },
     null,
     2,

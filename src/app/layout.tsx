@@ -21,7 +21,7 @@ const newsreader = Newsreader({
 export const metadata: Metadata = {
   title: "Sorted — dump the mess, keep the day",
   description:
-    "Open it in the morning. Tick the repeating list, log money, pick dinner, close the night. Dump the mess when you need OpenAI.",
+    "Open it in the morning. Tick the repeating list, log money, pick dinner, close the night. Dump the mess when something lands.",
   applicationName: "Sorted",
   appleWebApp: {
     capable: true,
@@ -30,6 +30,10 @@ export const metadata: Metadata = {
   },
   formatDetection: {
     telephone: false,
+  },
+  robots: {
+    index: false,
+    follow: false,
   },
 };
 

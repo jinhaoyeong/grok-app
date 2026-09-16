@@ -6,9 +6,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { KeyBanner } from "@/components/key-banner";
 import { Textarea } from "@/components/ui/textarea";
-import { postJson } from "@/lib/client-api";
+import { postJson, UNAVAILABLE } from "@/lib/client-api";
 import { DUMP_CHIPS } from "@/lib/examples";
 import { compressImage } from "@/lib/image";
 import { mergeBoard, toBoardPatch } from "@/lib/merge";
@@ -47,14 +46,12 @@ function withSpends(extracted: ExtractedBoard): ExtractedBoard {
 export function DumpView({
   board,
   settings,
-  hasKey,
-  onOpenSettings,
+  canUseModel,
   onAccept,
 }: {
   board: Board;
   settings: Settings;
-  hasKey: boolean;
-  onOpenSettings: () => void;
+  canUseModel: boolean;
   onAccept: (
     next: Board,
     extras: {
@@ -84,8 +81,8 @@ export function DumpView({
   }
 
   async function sortDump() {
-    if (!hasKey) {
-      setError("Add your OpenAI API key in Settings first.");
+    if (!canUseModel) {
+      setError(UNAVAILABLE);
       return;
     }
     if (!text.trim() && !image) {
@@ -112,7 +109,6 @@ export function DumpView({
             nowIso: new Date().toISOString(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           },
-          settings.apiKey.trim() || undefined,
         ),
       );
       setExtracted(result);
@@ -166,8 +162,6 @@ export function DumpView({
           board. Money and dinner land on Today.
         </p>
       </header>
-
-      {!hasKey ? <KeyBanner onOpenSettings={onOpenSettings} /> : null}
 
       <div className="flex flex-wrap gap-2">
         {DUMP_CHIPS.map((chip) => (
@@ -234,7 +228,7 @@ export function DumpView({
           disabled={busy}
         >
           <SparklesIcon />
-          {busy ? "Sorting…" : "Sort with OpenAI"}
+          {busy ? "Sorting…" : "Sort this"}
         </Button>
         <input
           ref={cameraRef}

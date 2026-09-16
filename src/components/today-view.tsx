@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/copy-button";
 import { Input } from "@/components/ui/input";
-import { postJson } from "@/lib/client-api";
+import { postJson, UNAVAILABLE } from "@/lib/client-api";
 import {
   dayPhase,
   dueHabits,
@@ -57,7 +57,7 @@ export function TodayView({
   life,
   onLife,
   settings,
-  hasKey,
+  canUseModel,
   now,
   onDump,
   onReply,
@@ -68,7 +68,7 @@ export function TodayView({
   life: Life;
   onLife: (life: Life) => void;
   settings: Settings;
-  hasKey: boolean;
+  canUseModel: boolean;
   now: Date | null;
   onDump: () => void;
   onReply: () => void;
@@ -260,8 +260,8 @@ export function TodayView({
   }
 
   async function runBrief() {
-    if (!hasKey) {
-      setError("Add an OpenAI key in Settings to plan the next 90 minutes.");
+    if (!canUseModel) {
+      setError(UNAVAILABLE);
       return;
     }
     setBusy("brief");
@@ -270,7 +270,6 @@ export function TodayView({
       const result = await postJson<DayBrief>(
         "/api/day",
         { action: "brief", ...dayBody() },
-        settings.apiKey.trim() || undefined,
       );
       patchDay({
         brief: [result.headline, ...result.moves.map((move) => `• ${move}`)].join(
@@ -288,11 +287,10 @@ export function TodayView({
     setBusy("dinner");
     setError(null);
     try {
-      if (hasKey) {
+      if (canUseModel) {
         const result = await postJson<DayDinner>(
           "/api/day",
           { action: "dinner", ...dayBody() },
-          settings.apiKey.trim() || undefined,
         );
         patchDay({
           dinner: { ...result, source: "ai" },
@@ -321,11 +319,10 @@ export function TodayView({
       day.dinner?.name,
     );
     try {
-      if (hasKey) {
+      if (canUseModel) {
         const result = await postJson<DayWrap>(
           "/api/day",
           { action: "wrap", ...dayBody() },
-          settings.apiKey.trim() || undefined,
         );
         patchDay({
           wrap: `${result.wrap} Tomorrow: ${result.tomorrow}`,

@@ -100,7 +100,6 @@ export type Profile = {
 };
 
 export type Settings = {
-  apiKey: string;
   model: ModelId;
   profile: Profile;
   currency: string;

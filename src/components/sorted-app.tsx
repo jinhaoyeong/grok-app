@@ -13,8 +13,9 @@ import { DumpView } from "@/components/dump-view";
 import { ReplyView } from "@/components/reply-view";
 import { SettingsView } from "@/components/settings-view";
 import { TodayView } from "@/components/today-view";
+import { UnlockView } from "@/components/unlock-view";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getStatus } from "@/lib/client-api";
+import { getStatus, lockApp, type AppStatus } from "@/lib/client-api";
 import { applyDumpToLife, dueHabits, ensureDay, localDateKey } from "@/lib/day";
 import {
   defaultSettings,
@@ -51,7 +52,7 @@ export function SortedApp() {
   const [life, setLife] = useState<Life>(emptyLife);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [hydrated, setHydrated] = useState(false);
-  const [hasServerKey, setHasServerKey] = useState(false);
+  const [status, setStatus] = useState<AppStatus | null>(null);
   const [now, setNow] = useState<Date | null>(null);
 
   if (isClient && !hydrated) {
@@ -65,8 +66,8 @@ export function SortedApp() {
   useEffect(() => {
     if (!hydrated) return;
     void getStatus()
-      .then((status) => setHasServerKey(status.hasServerKey))
-      .catch(() => setHasServerKey(false));
+      .then(setStatus)
+      .catch(() => setStatus({ locked: true, ai: false, gate: true }));
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, [hydrated]);
@@ -83,7 +84,7 @@ export function SortedApp() {
     if (hydrated) saveSettings(settings);
   }, [settings, hydrated]);
 
-  const hasKey = Boolean(settings.apiKey.trim()) || hasServerKey;
+  const canUseModel = Boolean(status?.ai);
   const todayKey = localDateKey(now ?? new Date());
   const today = ensureDay(life, todayKey);
   const leftoverChecks = hydrated
@@ -92,6 +93,28 @@ export function SortedApp() {
 
   function goSettings() {
     setTab("settings");
+  }
+
+  async function refreshStatus() {
+    const next = await getStatus();
+    setStatus(next);
+  }
+
+  if (!hydrated || !status) {
+    return (
+      <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-4 pt-10">
+        <p className="font-heading text-xl italic">Sorted</p>
+        <div className="mt-6 flex flex-col gap-3">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  if (status.locked) {
+    return <UnlockView onUnlock={refreshStatus} />;
   }
 
   return (
@@ -150,22 +173,14 @@ export function SortedApp() {
           </p>
         </div>
 
-        {!hydrated ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-8 w-40" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        ) : null}
-
-        {hydrated && tab === "today" ? (
+        {tab === "today" ? (
           <TodayView
             board={board}
             onChange={setBoard}
             life={life}
             onLife={setLife}
             settings={settings}
-            hasKey={hasKey}
+            canUseModel={canUseModel}
             now={now}
             onDump={() => setTab("dump")}
             onReply={() => setTab("reply")}
@@ -173,12 +188,11 @@ export function SortedApp() {
           />
         ) : null}
 
-        {hydrated && tab === "dump" ? (
+        {tab === "dump" ? (
           <DumpView
             board={board}
             settings={settings}
-            hasKey={hasKey}
-            onOpenSettings={goSettings}
+            canUseModel={canUseModel}
             onAccept={(next, extras) => {
               setBoard(next);
               if (extras.spends.length || extras.dinner) {
@@ -189,12 +203,11 @@ export function SortedApp() {
           />
         ) : null}
 
-        {hydrated && tab === "reply" ? (
+        {tab === "reply" ? (
           <ReplyView
             board={board}
             settings={settings}
-            hasKey={hasKey}
-            onOpenSettings={goSettings}
+            canUseModel={canUseModel}
             onSaveDraft={(next) => {
               setBoard(next);
               setTab("today");
@@ -202,12 +215,11 @@ export function SortedApp() {
           />
         ) : null}
 
-        {hydrated && tab === "decide" ? (
+        {tab === "decide" ? (
           <DecideView
             board={board}
             settings={settings}
-            hasKey={hasKey}
-            onOpenSettings={goSettings}
+            canUseModel={canUseModel}
             onSaveTask={(next) => {
               setBoard(next);
               setTab("today");
@@ -215,11 +227,11 @@ export function SortedApp() {
           />
         ) : null}
 
-        {hydrated && tab === "settings" ? (
+        {tab === "settings" ? (
           <SettingsView
             settings={settings}
             onChange={setSettings}
-            hasServerKey={hasServerKey}
+            gate={status.gate}
             board={board}
             life={life}
             onLife={setLife}
@@ -227,6 +239,14 @@ export function SortedApp() {
               setBoard(emptyBoard());
               setLife(emptyLife());
             }}
+            onLock={
+              status.gate
+                ? async () => {
+                    await lockApp();
+                    await refreshStatus();
+                  }
+                : undefined
+            }
           />
         ) : null}
       </main>

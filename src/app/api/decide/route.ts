@@ -1,32 +1,34 @@
 import { generateText, Output } from "ai";
+import { readJsonBody, requireAiAccess } from "@/lib/api-guard";
 import {
+  getOpenAiApiKey,
+  jsonError,
+  jsonOk,
   missingKeyResponse,
   openaiClient,
-  resolveApiKey,
   resolveModel,
   toErrorMessage,
 } from "@/lib/openai-server";
 import { decideRequestSchema, decideResultSchema } from "@/lib/schemas";
 
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const MAX_BYTES = 100_000;
+
 export async function POST(request: Request) {
-  const apiKey = resolveApiKey(request);
+  const blocked = await requireAiAccess(request, { maxBytes: MAX_BYTES });
+  if (blocked) return blocked;
+
+  const apiKey = getOpenAiApiKey();
   if (!apiKey) return missingKeyResponse();
 
-  let json: unknown;
-  try {
-    json = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const bodyRead = await readJsonBody(request, MAX_BYTES);
+  if (!bodyRead.ok) return bodyRead.response;
 
-  const parsed = decideRequestSchema.safeParse(json);
+  const parsed = decideRequestSchema.safeParse(bodyRead.value);
   if (!parsed.success) {
-    return Response.json(
-      { error: "Give a decision and at least two options." },
-      { status: 400 },
-    );
+    return jsonError("Give a decision and at least two options.", 400);
   }
 
   const body = parsed.data;
@@ -69,14 +71,11 @@ export async function POST(request: Request) {
     });
 
     if (!output) {
-      return Response.json(
-        { error: "The model did not pick anything." },
-        { status: 502 },
-      );
+      return jsonError("The model did not pick anything.", 502);
     }
 
-    return Response.json(output);
+    return jsonOk(output);
   } catch (error) {
-    return Response.json({ error: toErrorMessage(error) }, { status: 502 });
+    return jsonError(toErrorMessage(error), 502);
   }
 }

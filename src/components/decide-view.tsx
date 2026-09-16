@@ -6,24 +6,21 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { KeyBanner } from "@/components/key-banner";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { postJson } from "@/lib/client-api";
+import { postJson, UNAVAILABLE } from "@/lib/client-api";
 import { createId } from "@/lib/ids";
 import type { Board, DecideResult, Settings } from "@/lib/types";
 
 export function DecideView({
   board,
   settings,
-  hasKey,
-  onOpenSettings,
+  canUseModel,
   onSaveTask,
 }: {
   board: Board;
   settings: Settings;
-  hasKey: boolean;
-  onOpenSettings: () => void;
+  canUseModel: boolean;
   onSaveTask: (board: Board) => void;
 }) {
   const [decision, setDecision] = useState("");
@@ -38,8 +35,8 @@ export function DecideView({
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
-    if (!hasKey) {
-      setError("Add your OpenAI API key in Settings first.");
+    if (!canUseModel) {
+      setError(UNAVAILABLE);
       return;
     }
     if (!decision.trim() || options.length < 2) {
@@ -58,7 +55,6 @@ export function DecideView({
           model: settings.model,
           profile: settings.profile,
         },
-        settings.apiKey.trim() || undefined,
       );
       setResult(next);
     } catch (caught) {
@@ -79,8 +75,6 @@ export function DecideView({
           Dinner, plans, which task first. One answer, then a first step.
         </p>
       </header>
-
-      {!hasKey ? <KeyBanner onOpenSettings={onOpenSettings} /> : null}
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="decision">The decision</Label>
